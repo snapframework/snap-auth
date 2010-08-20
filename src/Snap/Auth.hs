@@ -11,7 +11,6 @@ module Snap.Auth
 
 import           Char
 import           Maybe
-import           Numeric
 import           Random
 
 import           Control.Monad.Reader
@@ -61,10 +60,8 @@ newtype SessionId = SessionId { unSid :: Integer }
 -- to provent session hijacking.
 genSessionId :: MonadAuth m => m SessionId
 genSessionId = do
-    chars <- liftIO $ sequence $ take 32 $ repeat $
-        randomRIO (0::Int,15) >>= return . flip showHex ""
-    return $ SessionId $ fst $ head $ readHex $ concat chars
-
+    r <- liftIO $ randomRIO (0, 2^(128::Integer) - 1)
+    return $ SessionId r
 
 ------------------------------------------------------------------------------
 -- | Represents user identifiers.  This could be a username, email address, or
