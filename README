@@ -1,0 +1,28 @@
+Snap-auth provides authentication code and session management for Snap.
+Eventually this will probably be moved into the snap package.  But we're
+starting it off in a separate package until we get a better sense of how snap
+code will be organized.
+
+Notes
+-----
+
+The design philosophy is that we let the user choose a persistence mechanism
+consistent with their application.  Other than that, as much as possible
+should be done here.  Random session key and salt generation, hashing,
+password verification, etc need special care to ensure the cryptographic
+properties necessary for strong security.  The user should not have to think
+about these concerns.
+
+Currently this code requires the 0.3 branch of snap-core that is still in very
+early development.
+
+TODO List
+---------
+Challenge/response authentication (http://pajhome.org.uk/crypt/md5/auth.html)
+  This is needed to provide secure authentication without SSL.  The goal is to
+  take as much of the burden as possible off the end user, which probably
+  means including some Javascript code for use on the client side.  If the
+  client is not javascript-enabled, then the user should have the option to
+  failover seamlessly to less secure authentication (that transmits cleartext
+  passwords across the network) or alert the user and disallow logins..  
+

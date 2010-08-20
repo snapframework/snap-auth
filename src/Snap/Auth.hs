@@ -63,7 +63,7 @@ genSessionId :: MonadAuth m => m SessionId
 genSessionId = do
     chars <- liftIO $ sequence $ take 32 $ repeat $
         randomRIO (0::Int,15) >>= return . flip showHex ""
-    return $ SessionId $ read $ concat chars
+    return $ SessionId $ fst $ head $ readHex $ concat chars
 
 
 ------------------------------------------------------------------------------
