@@ -88,5 +88,5 @@ buildSaltAndHash hf str = do
 -- | Checks that the input string is the same as the SaltedHash.
 checkSalt :: HashFunc -> ByteString -> SaltedHash -> Bool
 checkSalt hf str (SaltedHash (Salt salt) h) =
-    h == salt++(hf $ salt++(B.unpack str))
+    h == (hf $ salt++(B.unpack str))
 
