@@ -122,34 +122,10 @@ performLogout = do
 
 
 ------------------------------------------------------------------------------
--- | A 'MonadSnap' handler that processes a login form.  The parameters "userid"
--- and "password" must be contained in the request.  "userid" should be a
--- string that uniquely identifies the user (i.e. username, email address,
--- OpenID identifier, etc).
---
--- TODO Add support for a challenge/response system to avoid transmitting
--- cleartext passwords.
-loginHandler :: MonadAuth m => m a -> m a -> m a
-loginHandler loginSuccess loginFailure = do
-    uid <- getParam "userid"
-    password <- getParam "password"
-    mMatch <- fromMaybe (return False) $
-        liftM2 authenticate (fmap UserId uid) password
-    if mMatch then loginSuccess else loginFailure
-
-
-------------------------------------------------------------------------------
 -- | Gets the 'SessionId' for the current user.
 getSessionId :: MonadAuth m => m (Maybe SessionId)
 getSessionId = getCookie sESSION_COOKIE >>=
     return . fmap (read . B.unpack . cookieValue)
-
-
-------------------------------------------------------------------------------
--- | This function might be unnecessary.  Leaving it in until we see how
--- things flesh out in actual use.
-logoutHandler :: MonadAuth m => m a -> m a
-logoutHandler target = performLogout >> target
 
 
 ------------------------------------------------------------------------------
@@ -169,21 +145,4 @@ checkAndAdd uExists good user password = do
   u <- register user password
   maybe uExists (const good <=< performLogin) u
 
-
-------------------------------------------------------------------------------
--- | A 'MonadSnap' handler that processes a new user form.  The parameters
--- "userid", "password", and "password2" must be contained in the request.
-newUserHandler :: MonadAuth m => m a -> m a -> (UserId -> m a) -> m a
-newUserHandler existsOrInvalid noMatch success = do
-    uid <- getParam "userid"
-    pass1 <- getParam "password"
-    pass2 <- getParam "password2"
-    fromMaybe existsOrInvalid $ liftM3 proc uid pass1 pass2
-  where
-    proc uid pass1 pass2
-      | not (saneUsername uid) = existsOrInvalid
-      | pass1 /= pass2 = noMatch
-      | otherwise = checkAndAdd existsOrInvalid (success (UserId uid)) (UserId uid) pass1
-    saneUsername str = B.foldl (\b c -> b && isAlphaNum c) True str
-        
 
