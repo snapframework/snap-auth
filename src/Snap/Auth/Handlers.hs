@@ -21,10 +21,13 @@ import Snap.Types
 import Snap.Auth
 
 ------------------------------------------------------------------------------
--- | A 'MonadSnap' handler that processes a login form.  The parameters "userid"
--- and "password" must be contained in the request.  "userid" should be a
--- string that uniquely identifies the user (i.e. username, email address,
--- OpenID identifier, etc).
+-- | A 'MonadSnap' handler that processes a login form. Pass fields that
+-- uniquely identify a user (i.e. username, email address,
+-- OpenID identifier, etc) and the password field.
+--
+-- Example Usage:
+--
+-- @loginHandler [\"account\", \"username\"] \"password\" lSuccess lFail@
 --
 -- TODO Add support for a challenge/response system to avoid transmitting
 -- cleartext passwords.
@@ -57,8 +60,14 @@ logoutHandler target = performLogout >> target
 
 
 ------------------------------------------------------------------------------
--- | A 'MonadSnap' handler that processes a new user form.  The parameters
--- "userid", "password", and "password2" must be contained in the request.
+-- | A 'MonadSnap' handler that processes a new user form. Usage is similar to 
+-- "loginHandler".
+--
+-- Example Usage:
+--
+-- @newUserHandler [\"account\", \"username\"] 
+--                 (\"pass\", \"pass_conf\") 
+--                 uValidate existsOrInvalid noMatch success@
 newUserHandler :: MonadAuth m 
                => [ByteString]
                -- ^ A list of param fields that uniquely identify a user
