@@ -1,5 +1,5 @@
 Name:                snap-auth
-Version:             0.0.1
+Version:             0.0.2
 Synopsis:            An authentication system for Snap
 Author:              Doug Beardsley
 
@@ -14,6 +14,7 @@ Library
         src
     exposed-modules:
         Snap.Auth
+        Snap.Auth.Handlers
     other-modules:
         Snap.Auth.Password
 
