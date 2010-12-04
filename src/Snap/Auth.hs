@@ -2,11 +2,11 @@
              OverloadedStrings #-}
 module Snap.Auth
   ( MonadAuth
+  , UserId(..)
+  , authenticate
+  , checkAndAdd
   , performLogin
   , performLogout
-  , loginHandler
-  , logoutHandler
-  , newUserHandler
   ) where
 
 import           Char
