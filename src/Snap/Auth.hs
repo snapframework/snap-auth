@@ -66,7 +66,7 @@ genSessionId = do
 ------------------------------------------------------------------------------
 -- | Represents user identifiers.  This could be a username, email address, or
 -- some other token supplied by the user that uniquely identifies him/her.
-newtype UserId = UserId { unUid :: ByteString }
+newtype UserId = UserId { unUid :: [ByteString] }
     deriving (Read,Show,Ord,Eq,Typeable,Data)
 
 
