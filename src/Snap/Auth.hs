@@ -1,12 +1,26 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, DeriveDataTypeable,
-             OverloadedStrings #-}
+{-| 
+
+  This module is intended for high-level authentication functionality for Snap
+  applications.
+
+-}
 module Snap.Auth
-  ( MonadAuth
+  ( 
+  -- * Auth Class
+    MonadAuth(..)
+
+  -- * Types
   , UserId(..)
-  , authenticate
-  , checkAndAdd
+  , ExternalUserId(..)
+  , User(..)
+
+  -- * Higher Level Helper Functions
+  , registerUser
   , performLogin
   , performLogout
+  , requireUser
+  , currentUser
+
   ) where
 
 import           Char
@@ -17,132 +31,159 @@ import           Control.Monad.Reader
 import           Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
 import           Data.Generics hiding ((:+:))
+import           Data.Map (Map)
 import           Data.Time.Clock
 
 import           Snap.Auth.Password
 import           Snap.Types
 
 
-sESSION_COOKIE :: ByteString
-sESSION_COOKIE = "snap-sid"
-
-
 ------------------------------------------------------------------------------
--- | Convenience function for creating the session cookie.
-mkSessionCookie :: SessionId -> Maybe UTCTime -> Response -> Response
-mkSessionCookie sid expiration = addCookie $
-    Cookie "snap-sid" (B.pack $ show sid) expiration Nothing (Just "/")
-
-
-------------------------------------------------------------------------------
--- | Sets the session cookie.
-setSessionCookie :: MonadSnap m => SessionId -> Integer -> m ()
-setSessionCookie sid ttl = do
-    cur <- liftIO getCurrentTime
-    modifyResponse $ mkSessionCookie sid
-        (Just $ addUTCTime (fromInteger ttl) cur)
-
-
-------------------------------------------------------------------------------
--- | Clears the session cookie.
-clearSessionCookie :: MonadSnap m => m ()
-clearSessionCookie = setSessionCookie (SessionId 0) 0
-
-
-------------------------------------------------------------------------------
--- | Type representing session identifiers.
-newtype SessionId = SessionId { unSid :: Integer }
-    deriving (Read,Show,Ord,Eq,Typeable,Data,Num,Random)
-
-
-------------------------------------------------------------------------------
--- | Generates a random session ID.  This needs to be large and strong enough
--- to provent session hijacking.
-genSessionId :: MonadAuth m => m SessionId
-genSessionId = do
-    r <- liftIO $ randomRIO (0, 2^(128::Integer) - 1)
-    return $ SessionId r
-
-------------------------------------------------------------------------------
--- | Represents user identifiers.  This could be a username, email address, or
--- some other token supplied by the user that uniquely identifies him/her.
-newtype UserId = UserId { unUid :: [ByteString] }
+-- | Internal representation of a 'User'. By convention, we demand that the
+-- application is able to directly fetch a 'User' using this identifier.
+newtype UserId = UserId { unUid :: ByteString }
     deriving (Read,Show,Ord,Eq,Typeable,Data)
 
 
 ------------------------------------------------------------------------------
--- | Type representing session identifiers.
-data User = User {
-    userid :: UserId,
-    userpass :: SaltedHash
-} deriving (Read,Show,Ord,Eq,Typeable,Data)
+-- | External / end-user-facing identifier for a 'User'. 
+--
+-- For example, this could be a (\"username\", \"john.doe\") pair submitted
+-- through a web form.
+newtype ExternalUserId = EUId { unEuid :: Map ByteString ByteString } 
+    deriving (Read,Show,Ord,Eq,Typeable,Data)
 
 
 ------------------------------------------------------------------------------
--- | Type class defining the set of functions needed to support user sessions
--- and authentication.
+-- | Type representing the concept of a User in your application.
+--
+-- At a minimum, we require that your users have a unique internal identifier
+-- and a scrambled password field. It may also have a parametric field that you
+-- can define so that you have access to additional information that your
+-- application may requrie. 
+data User t = User 
+  { userId :: UserId
+  , userPass :: SaltedHash
+  , userData :: t
+  } deriving (Read,Show,Ord,Eq,Typeable,Data)
+
+
+------------------------------------------------------------------------------
+-- | Type class defining the set of functions needed to support user
+-- authentication.
+--
+-- Your have to make your Application's monad a member of this typeclass and
+-- implement the following functions:
 class MonadSnap m => MonadAuth m where
+
+    --------------------------------------------------------------------------
+    -- | Define a hash function to be used. Use 'defaultHash' if you are unsure.
     authHash :: m HashFunc
-    createSession :: UserId -> SessionId -> m Bool
-    removeSession :: SessionId -> m Bool
-    getUser :: UserId -> m (Maybe User)
-    addUser :: UserId -> SaltedHash -> m (Maybe UserId)
+
+
+    --------------------------------------------------------------------------
+    -- | Define a function that can resolve to a 'User' from an internal
+    -- 'UserId'. 
+    --
+    -- The 'UserId' is persisted in your application's session
+    -- to check for the existence of an authenticated user in your handlers.
+    -- A typical 'UserId' would be the unique database key given to your user's
+    -- record.
+    getUserInternal :: UserId -> m (Maybe (User t))
+
+
+    --------------------------------------------------------------------------
+    -- | Define a function that can resolve to a 'User' using the external, user
+    -- supplied 'User' identifier.
+    getUserExternal :: ExternalUserId -> m (Maybe (User t))
+
+
+    --------------------------------------------------------------------------
+    -- | Persist the given 'UserId' identifier in your session so that it
+    -- can later be accessed using 'currentUser'.
+    setCurrentUserId :: UserId -> m ()
+
+
+    --------------------------------------------------------------------------
+    -- | If the user is authenticated, the 'UserId' should be persisted somewhere
+    -- in your session through the first 'setCurrentUserId' call. Define
+    -- a function that can retrieve it.
+    getCurrentUserId :: m (Maybe UserId)
+
+
+    --------------------------------------------------------------------------
+    -- | Define a function that creates a user record in your DB. 
+    addUser :: ExternalUserId   
+            -- ^ User-facing identifiers; typically passed through a web form.
+            -> SaltedHash   
+            -- ^ Scrambled password text; Snap.Auth will supply this to you.
+            -> Params   
+            -- ^ Submitted web-form params; in case you want to store other
+            -- user-specific information.
+            -> m (Maybe UserId)   
+            -- ^ If the call succeeds, an application-internal user id.
 
 
 ------------------------------------------------------------------------------
--- | Logs a user in.  This involves creating a session and setting the session
-authenticate :: MonadAuth m => UserId -> ByteString -> m Bool
+-- | Authenticates a user using user-supplied 'ExternalUserId'.
+--
+-- Returns the internal 'UserId' if successful, 'Nothing' otherwise.
+-- Note that this will not persist the authentication. See 'performLogin' for
+-- that.
+authenticate :: MonadAuth m => ExternalUserId -> ByteString -> m (Maybe UserId)
 authenticate uid password = do
     hf <- authHash
-    user <- getUser uid
-    return $ fromMaybe False $
-        fmap (checkSalt hf password) (fmap userpass user)
+    user <- getUserExternal uid
+    authSucc <- return $ fromMaybe False $
+        fmap (checkSalt hf password) (fmap userPass user)
+    return $ case authSucc of
+      True -> fmap userId user
+      False -> Nothing
 
 
 ------------------------------------------------------------------------------
--- | Logs a user in.  This involves creating a session and setting the session
--- cookie.  This function assumes that the caller has already authenticated
--- the user.
-performLogin :: MonadAuth m => UserId -> m Bool
-performLogin user = do
-    sid <- genSessionId
-    setSessionCookie sid 2678400
-    createSession user sid
+-- | Authenticates a user and persists the authentication in the session if
+-- successful.
+performLogin :: MonadAuth m => ExternalUserId -> ByteString -> m (Maybe UserId)
+performLogin uid password = do
+  uid <- authenticate uid password
+  case uid of
+    Just uid' -> setCurrentUserId uid' >> return (Just uid')
+    Nothing -> return Nothing
 
 
 ------------------------------------------------------------------------------
--- | Logs a user out.  This involves deleting the session and clearing the
--- session cookie.  Returns a boolean flag indicating whether the session was
--- existed and was successfully removed.
-performLogout :: MonadAuth m => m Bool
-performLogout = do
-    sid <- getSessionId
-    clearSessionCookie
-    maybe (return False) removeSession sid
+-- | Logs a user out.  
+performLogout :: MonadAuth m => m ()
+performLogout = setCurrentUserId $ UserId ""
 
 
 ------------------------------------------------------------------------------
--- | Gets the 'SessionId' for the current user.
-getSessionId :: MonadAuth m => m (Maybe SessionId)
-getSessionId = getCookie sESSION_COOKIE >>=
-    return . fmap (read . B.unpack . cookieValue)
-
-
-------------------------------------------------------------------------------
--- | Adds a user with the specified UserId and password.
-register :: MonadAuth m => UserId -> ByteString -> m (Maybe UserId)
-register user password = do
+-- | Adds a user to DB with the specified 'ExternalUserId' and password.
+registerUser :: MonadAuth m => ExternalUserId 
+             -> ByteString 
+             -> Params
+             -> m (Maybe UserId)
+registerUser user password params = do
   hf <- authHash
   h <- liftIO $ buildSaltAndHash hf password
-  addUser user h
+  addUser user h params
 
 
 ------------------------------------------------------------------------------
--- | This function might need to be offloaded to the user as a part of the
--- 'MonadAuth' type class to allow atomicity guarantees.
-checkAndAdd :: MonadAuth m => m a -> m a -> UserId -> ByteString -> m a
-checkAndAdd uExists good user password = do
-  u <- register user password
-  maybe uExists (const good <=< performLogin) u
+-- | Get the current 'User' if authenticated, 'Nothing' otherwise.
+currentUser :: MonadAuth m => m (Maybe (User t))
+currentUser = getCurrentUserId >>= maybe (return Nothing) getUserInternal
 
 
+------------------------------------------------------------------------------
+-- | Require that an authenticated 'User' is present in the current session.
+--
+-- This function has no DB cost - only checks to see if a user_id is present in
+-- the current session.
+requireUser :: MonadAuth m => m a   
+            -- ^ Do this if no authenticated user is present.
+            -> m a    
+            -- ^ Do this if an authenticated user is present.
+            -> m a
+requireUser bad good = getCurrentUserId >>= maybe bad (const good)

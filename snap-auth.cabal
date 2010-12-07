@@ -1,5 +1,5 @@
 Name:                snap-auth
-Version:             0.0.2
+Version:             0.0.3
 Synopsis:            An authentication system for Snap
 Author:              Doug Beardsley
 
@@ -14,7 +14,6 @@ Library
         src
     exposed-modules:
         Snap.Auth
-        Snap.Auth.Handlers
     other-modules:
         Snap.Auth.Password
 
@@ -22,6 +21,7 @@ Library
         Crypto >= 4.2.0,
         base >= 4 && <5,
         bytestring,
+        containers >= 0.3,
         haskell98,
         monads-fd >= 0.1 && <0.2,
         old-locale,
@@ -30,3 +30,8 @@ Library
         time
 
     ghc-options: -Wall -funbox-strict-fields -O2 -fvia-C -optc-O3 -funfolding-use-threshold=16
+
+    extensions:
+        OverloadedStrings
+      , DeriveDataTypeable
+      , GeneralizedNewtypeDeriving
