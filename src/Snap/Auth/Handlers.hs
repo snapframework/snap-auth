@@ -32,11 +32,11 @@ import Snap.Auth
 loginHandler :: MonadAuth m => ByteString 
              -- ^ The password param field
              -> m a 
-             -- ^ Upon success
-             -> m a 
              -- ^ Upon failure
+             -> m a 
+             -- ^ Upon success
              -> m a
-loginHandler pwdf loginSuccess loginFailure = do
+loginHandler pwdf loginFailure loginSuccess = do
     euid <- getRequest >>= return . return . EUId . rqParams
     password <- getParam pwdf
     mMatch <- fromMaybe (return Nothing) $
