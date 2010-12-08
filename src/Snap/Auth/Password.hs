@@ -9,7 +9,8 @@
 -}
 
 module Snap.Auth.Password
-  ( SaltedHash
+  ( SaltedHash(..)
+  , Salt(..)
   , buildSaltAndHash
   , checkSalt
   , HashFunc
@@ -41,10 +42,10 @@ newtype Salt = Salt { unSalt :: [Octet] }
 
 ------------------------------------------------------------------------------
 -- | Data structure representing a salted hash.
-data SaltedHash = SaltedHash {
-    shSalt :: Salt,
-    shHash :: [Octet]
-} deriving (Read,Show,Ord,Eq,Typeable,Data)
+data SaltedHash = SaltedHash 
+  { shSalt :: Salt
+  , shHash :: [Octet]
+  } deriving (Read,Show,Ord,Eq,Typeable,Data)
 
 
 ------------------------------------------------------------------------------

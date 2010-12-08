@@ -1,46 +1,59 @@
 {-| 
 
-  This module is intended for high-level authentication functionality for Snap
-  applications.
+  This module provides simple and secure high-level authentication
+  functionality for Snap applications.
 
 -}
 module Snap.Auth
   ( 
-  -- * Auth Class
-    MonadAuth(..)
+
+  -- * Higher Level Helper Functions
+  -- $higherlevel
+    registerUser
+  , authLogin
+  , performLogout
+  , requireUser
+  , currentUser
+
+  -- * MonadAuth Class
+  , MonadAuth(..)
 
   -- * Types
   , UserId(..)
   , ExternalUserId(..)
   , User(..)
 
-  -- * Higher Level Helper Functions
-  , registerUser
-  , performLogin
-  , performLogout
-  , requireUser
-  , currentUser
+  -- * Crypto Stuff You'll Need
+  -- $crypto
+  , SaltedHash(..)
+  , Salt(..)
+  , defaultHash
+  , HashFunc
 
   ) where
 
-import           Char
 import           Maybe
-import           Random
 
 import           Control.Monad.Reader
 import           Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
 import           Data.Generics hiding ((:+:))
 import           Data.Map (Map)
-import           Data.Time.Clock
 
 import           Snap.Auth.Password
 import           Snap.Types
 
 
+-- $crypto
+-- These are types and functions you will need when instantiating your
+-- application's monad with 'MonadAuth'. 
+
 ------------------------------------------------------------------------------
 -- | Internal representation of a 'User'. By convention, we demand that the
 -- application is able to directly fetch a 'User' using this identifier.
+--
+-- Think of this type as a secure, authenticated user. You should normally
+-- never see this type unless a user has been authenticated.
 newtype UserId = UserId { unUid :: ByteString }
     deriving (Read,Show,Ord,Eq,Typeable,Data)
 
@@ -50,7 +63,7 @@ newtype UserId = UserId { unUid :: ByteString }
 --
 -- For example, this could be a (\"username\", \"john.doe\") pair submitted
 -- through a web form.
-newtype ExternalUserId = EUId { unEuid :: Map ByteString ByteString } 
+newtype ExternalUserId = EUId { unEuid :: Params } 
     deriving (Read,Show,Ord,Eq,Typeable,Data)
 
 
@@ -61,10 +74,9 @@ newtype ExternalUserId = EUId { unEuid :: Map ByteString ByteString }
 -- and a scrambled password field. It may also have a parametric field that you
 -- can define so that you have access to additional information that your
 -- application may requrie. 
-data User t = User 
+data User = User 
   { userId :: UserId
   , userPass :: SaltedHash
-  , userData :: t
   } deriving (Read,Show,Ord,Eq,Typeable,Data)
 
 
@@ -89,18 +101,24 @@ class MonadSnap m => MonadAuth m where
     -- to check for the existence of an authenticated user in your handlers.
     -- A typical 'UserId' would be the unique database key given to your user's
     -- record.
-    getUserInternal :: UserId -> m (Maybe (User t))
+    getUserInternal :: UserId -> m (Maybe User)
 
 
     --------------------------------------------------------------------------
     -- | Define a function that can resolve to a 'User' using the external, user
-    -- supplied 'User' identifier.
-    getUserExternal :: ExternalUserId -> m (Maybe (User t))
+    -- supplied 'ExternalUserId' identifier. 
+    --
+    -- This is typically passed directly from the POST request.
+    getUserExternal :: ExternalUserId -> m (Maybe User)
 
 
     --------------------------------------------------------------------------
     -- | Persist the given 'UserId' identifier in your session so that it
     -- can later be accessed using 'currentUser'.
+    --
+    -- Please note that this is the primary way of logging a user in.
+    -- Once the the user's id has been persisted this way, 'currentUser' method
+    -- will return the 'User' associated with this id.
     setCurrentUserId :: UserId -> m ()
 
 
@@ -112,7 +130,8 @@ class MonadSnap m => MonadAuth m where
 
 
     --------------------------------------------------------------------------
-    -- | Define a function that creates a user record in your DB. 
+    -- | Define a function that creates a user record in your DB, or wherever
+    -- you plan on persisting user information. 
     addUser :: ExternalUserId   
             -- ^ User-facing identifiers; typically passed through a web form.
             -> SaltedHash   
@@ -141,15 +160,17 @@ authenticate uid password = do
       False -> Nothing
 
 
+-- $higherlevel
+-- These are the key functions you will use in your handlers. Once you have set
+-- up your application's monad with 'MonadAuth', you really should not need to
+-- use anything other than what is in this section.
+
 ------------------------------------------------------------------------------
 -- | Authenticates a user and persists the authentication in the session if
 -- successful.
-performLogin :: MonadAuth m => ExternalUserId -> ByteString -> m (Maybe UserId)
-performLogin uid password = do
-  uid <- authenticate uid password
-  case uid of
-    Just uid' -> setCurrentUserId uid' >> return (Just uid')
-    Nothing -> return Nothing
+authLogin :: MonadAuth m => ExternalUserId -> ByteString -> m (Maybe UserId)
+authLogin euid p = authenticate euid p >>= maybe (return Nothing) login
+  where login uid = setCurrentUserId uid >> return (Just uid)
 
 
 ------------------------------------------------------------------------------
@@ -160,6 +181,10 @@ performLogout = setCurrentUserId $ UserId ""
 
 ------------------------------------------------------------------------------
 -- | Adds a user to DB with the specified 'ExternalUserId' and password.
+-- 
+-- Also takes any other 'Params' in case you want to pass along additional
+-- information when creating a user. Calls the 'addUser' function of the class
+-- interface.
 registerUser :: MonadAuth m => ExternalUserId 
              -> ByteString 
              -> Params
@@ -172,7 +197,10 @@ registerUser user password params = do
 
 ------------------------------------------------------------------------------
 -- | Get the current 'User' if authenticated, 'Nothing' otherwise.
-currentUser :: MonadAuth m => m (Maybe (User t))
+-- 
+-- This is the primary way to check whether an authenticated 'User' is present
+-- in your handlers.
+currentUser :: MonadAuth m => m (Maybe User)
 currentUser = getCurrentUserId >>= maybe (return Nothing) getUserInternal
 
 
