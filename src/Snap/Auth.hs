@@ -114,18 +114,21 @@ class MonadSnap m => MonadAuth m where
 
     --------------------------------------------------------------------------
     -- | Persist the given 'UserId' identifier in your session so that it
-    -- can later be accessed using 'currentUser'.
+    -- can later be accessed using 'currentUser'. 
     --
     -- Please note that this is the primary way of logging a user in.
     -- Once the the user's id has been persisted this way, 'currentUser' method
     -- will return the 'User' associated with this id.
-    setCurrentUserId :: UserId -> m ()
+    --
+    -- If the given value is 'Nothing', your application should interpret it as
+    -- removing the UserId from the session.
+    setCurrentUserId :: Maybe UserId -> m ()
 
 
     --------------------------------------------------------------------------
-    -- | If the user is authenticated, the 'UserId' should be persisted somewhere
-    -- in your session through the first 'setCurrentUserId' call. Define
-    -- a function that can retrieve it.
+    -- | If the user is authenticated, the 'UserId' should be persisted
+    -- somewhere in your session through the first 'setCurrentUserId' call.
+    -- Define a function that can retrieve it.
     getCurrentUserId :: m (Maybe UserId)
 
 
@@ -170,13 +173,13 @@ authenticate uid password = do
 -- successful.
 authLogin :: MonadAuth m => ExternalUserId -> ByteString -> m (Maybe UserId)
 authLogin euid p = authenticate euid p >>= maybe (return Nothing) login
-  where login uid = setCurrentUserId uid >> return (Just uid)
+  where login uid = setCurrentUserId (Just uid) >> return (Just uid)
 
 
 ------------------------------------------------------------------------------
 -- | Logs a user out.  
 performLogout :: MonadAuth m => m ()
-performLogout = setCurrentUserId $ UserId ""
+performLogout = setCurrentUserId Nothing
 
 
 ------------------------------------------------------------------------------

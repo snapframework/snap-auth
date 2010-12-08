@@ -87,6 +87,6 @@ registerAndLogin :: MonadAuth m => m a -> m a -> ByteString -> m a
 registerAndLogin bad good password = do
   params <- getRequest >>= return . rqParams
   u <- registerUser (EUId params) password params
-  maybe (return ()) (setCurrentUserId) u
+  maybe (return ()) (setCurrentUserId . Just) u
   maybe bad (const good) u
 
