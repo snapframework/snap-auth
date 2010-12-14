@@ -36,9 +36,7 @@ import           Maybe
 
 import           Control.Monad.Reader
 import           Data.ByteString.Char8 (ByteString)
-import qualified Data.ByteString.Char8 as B
 import           Data.Generics hiding ((:+:))
-import           Data.Map (Map)
 
 import           Snap.Auth.Password
 import           Snap.Types
