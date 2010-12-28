@@ -12,6 +12,7 @@ module Snap.Auth.Password
   ( SaltedHash(..)
   , Salt(..)
   , buildSaltAndHash
+  , hashPassword
   , checkSalt
   , HashFunc
   , defaultHash
@@ -76,13 +77,19 @@ randomSalt = do
     return $ Salt $ map c2w $ concat chars
 
 ------------------------------------------------------------------------------
--- | Generates a random salt, hashes it, and returns a SaltedHash.
+-- | Generates a random salt, hashes it, and returns a 'SaltedHash'.
 buildSaltAndHash :: HashFunc -> ByteString -> IO SaltedHash
 buildSaltAndHash hf str = do
     salt <- randomSalt
-    let str' = B.unpack str
-    let h = hf ((unSalt salt)++str')
-    return $ SaltedHash salt h
+    return $ hashPassword hf salt str
+
+
+------------------------------------------------------------------------------
+-- | Hash the given salt ++ password and wrap into a 'SaltedHash'.
+hashPassword :: HashFunc -> Salt -> ByteString -> SaltedHash
+hashPassword hf s pwd = SaltedHash s h
+  where h = hf ((unSalt s) ++ pwd')
+        pwd' = B.unpack pwd
 
 
 ------------------------------------------------------------------------------

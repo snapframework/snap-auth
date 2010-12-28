@@ -7,13 +7,14 @@
 module Snap.Auth
   ( 
 
-  -- * Higher Level Helper Functions
+  -- * Higher Level Functions
   -- $higherlevel
-    registerUser
+    mkAuthCredentials
   , authLogin
   , performLogout
   , requireUser
   , currentUser
+  , isLoggedIn
 
   -- * MonadAuth Class
   , MonadAuth(..)
@@ -23,11 +24,7 @@ module Snap.Auth
   , ExternalUserId(..)
   , User(..)
 
-  -- * Crypto Stuff You'll Need
-  -- $crypto
-  , SaltedHash(..)
-  , Salt(..)
-  , defaultHash
+  -- * Crypto Stuff You May Need
   , HashFunc
 
   ) where
@@ -36,15 +33,14 @@ import           Maybe
 
 import           Control.Monad.Reader
 import           Data.ByteString.Char8 (ByteString)
+import qualified Data.ByteString as B
 import           Data.Generics hiding ((:+:))
+import qualified Data.Map as M
 
 import           Snap.Auth.Password
 import           Snap.Types
+import           Snap.Extension.Session
 
-
--- $crypto
--- These are types and functions you will need when instantiating your
--- application's monad with 'MonadAuth'. 
 
 ------------------------------------------------------------------------------
 -- | Internal representation of a 'User'. By convention, we demand that the
@@ -71,24 +67,39 @@ newtype ExternalUserId = EUId { unEuid :: Params }
 -- At a minimum, we require that your users have a unique internal identifier
 -- and a scrambled password field. It may also have a parametric field that you
 -- can define so that you have access to additional information that your
--- application may requrie. 
+-- application may require. 
 data User = User 
   { userId :: UserId
-  , userPass :: SaltedHash
+  , userEncryptedPassword :: ByteString
+  , userSalt :: ByteString
   } deriving (Read,Show,Ord,Eq,Typeable,Data)
 
+------------------------------------------------------------------------------
+-- | Make 'SaltedHash' from 'User'
+mkSaltedHash :: User -> SaltedHash
+mkSaltedHash (User _ p s) = SaltedHash s' p'
+  where s' = Salt (B.unpack s)
+        p' = B.unpack p
 
 ------------------------------------------------------------------------------
--- | Type class defining the set of functions needed to support user
--- authentication.
+-- | Typeclass for authentication and user session functionality.
 --
--- Your have to make your Application's monad a member of this typeclass and
--- implement the following functions:
-class MonadSnap m => MonadAuth m where
+-- Your have to make your Application's monad a member of this typeclass. 
+-- Minimum complete definition: 'getUserInternal', 'getUserExternal'
+--
+-- Requirements:
+--
+--  - Your app monad has to be a 'MonadSnap'.
+--
+--  - Your app monad has to be a 'MonadSession'. See 'Snap.Extension.Session'.
+--  This is needed so we can persist your users' login in session.
+class (MonadSnap m, MonadSession m) => MonadAuth m where
 
     --------------------------------------------------------------------------
-    -- | Define a hash function to be used. Use 'defaultHash' if you are unsure.
+    -- | Define a hash function to be used. Defaults to 'defaultHash', which
+    -- should be quite satisfactory for most purposes.
     authHash :: m HashFunc
+    authHash = return defaultHash 
 
 
     --------------------------------------------------------------------------
@@ -111,37 +122,38 @@ class MonadSnap m => MonadAuth m where
 
 
     --------------------------------------------------------------------------
-    -- | Persist the given 'UserId' identifier in your session so that it
-    -- can later be accessed using 'currentUser'. 
+    -- | Persist the given 'UserId' identifier in your session so that it can
+    -- later be accessed using 'currentUser'. A default is included using
+    -- Snap.Extension.Session.
     --
-    -- Please note that this is the primary way of logging a user in.
-    -- Once the the user's id has been persisted this way, 'currentUser' method
-    -- will return the 'User' associated with this id.
+    -- Please note that this is the primary way of logging a user in.  Once the
+    -- the user's id has been persisted this way, 'currentUser' method will
+    -- return the 'User' associated with this id.
     --
     -- If the given value is 'Nothing', your application should interpret it as
     -- removing the UserId from the session.
+    --
+    -- This function will be made obsolete once we figure out a standardized
+    -- way to handle session persistence. snap-auth will then do it for you.
     setCurrentUserId :: Maybe UserId -> m ()
+    setCurrentUserId u = do
+      s <- getSession 
+      let ns = maybe (M.delete "sauth_user_id" s) 
+                     (\u' -> M.insert "sauth_user_id" (unUid u') s) 
+                     u
+      setSession ns
 
 
     --------------------------------------------------------------------------
     -- | If the user is authenticated, the 'UserId' should be persisted
     -- somewhere in your session through the first 'setCurrentUserId' call.
-    -- Define a function that can retrieve it.
+    -- A default is included using Snap.Extension.Session.
+    --
+    -- This function will be made obsolete once we figure out a standardized
+    -- way to handle session persistence. snap-auth will then do it for you.
     getCurrentUserId :: m (Maybe UserId)
-
-
-    --------------------------------------------------------------------------
-    -- | Define a function that creates a user record in your DB, or wherever
-    -- you plan on persisting user information. 
-    addUser :: ExternalUserId   
-            -- ^ User-facing identifiers; typically passed through a web form.
-            -> SaltedHash   
-            -- ^ Scrambled password text; Snap.Auth will supply this to you.
-            -> Params   
-            -- ^ Submitted web-form params; in case you want to store other
-            -- user-specific information.
-            -> m (Maybe UserId)   
-            -- ^ If the call succeeds, an application-internal user id.
+    getCurrentUserId = getSession 
+                       >>= return . fmap UserId . M.lookup "sauth_user_id"
 
 
 ------------------------------------------------------------------------------
@@ -150,15 +162,19 @@ class MonadSnap m => MonadAuth m where
 -- Returns the internal 'UserId' if successful, 'Nothing' otherwise.
 -- Note that this will not persist the authentication. See 'performLogin' for
 -- that.
-authenticate :: MonadAuth m => ExternalUserId -> ByteString -> m (Maybe UserId)
+authenticate :: MonadAuth m 
+             => ExternalUserId        -- ^ External user identifiers
+             -> ByteString            -- ^ Password
+             -> m (Maybe UserId)      -- ^ Internal ID of user if match exists.
 authenticate uid password = do
     hf <- authHash
     user <- getUserExternal uid
     authSucc <- return $ fromMaybe False $
-        fmap (checkSalt hf password) (fmap userPass user)
+        fmap (checkSalt hf password) (fmap mkSaltedHash user)
     return $ case authSucc of
       True -> fmap userId user
       False -> Nothing
+
 
 
 -- $higherlevel
@@ -166,41 +182,46 @@ authenticate uid password = do
 -- up your application's monad with 'MonadAuth', you really should not need to
 -- use anything other than what is in this section.
 
+
 ------------------------------------------------------------------------------
--- | Authenticates a user and persists the authentication in the session if
--- successful.
-authLogin :: MonadAuth m => ExternalUserId -> ByteString -> m (Maybe UserId)
+-- | Given an 'ExternalUserId', authenticates the user and persists the
+-- authentication in the session if successful. 
+authLogin :: MonadAuth m 
+          => ExternalUserId        -- ^ External user identifiers
+          -> ByteString            -- ^ Password
+          -> m (Maybe UserId)      -- ^ Internal ID of user if match exists.
 authLogin euid p = authenticate euid p >>= maybe (return Nothing) login
   where login uid = setCurrentUserId (Just uid) >> return (Just uid)
 
 
 ------------------------------------------------------------------------------
--- | Logs a user out.  
+-- | Logs a user out from the current session.
 performLogout :: MonadAuth m => m ()
 performLogout = setCurrentUserId Nothing
 
 
 ------------------------------------------------------------------------------
--- | Adds a user to DB with the specified 'ExternalUserId' and password.
--- 
--- Also takes any other 'Params' in case you want to pass along additional
--- information when creating a user. Calls the 'addUser' function of the class
--- interface.
-registerUser :: MonadAuth m => ExternalUserId 
-             -> ByteString 
-             -> Params
-             -> m (Maybe UserId)
-registerUser user password params = do
+-- | Takes a clean-text password and returns a fresh pair of password and salt
+-- to be stored in your app's DB.
+mkAuthCredentials :: MonadAuth m
+                  => ByteString                   
+                  -- ^ A given password
+                  -> m (ByteString, ByteString)   
+                  -- ^ (Salt, Encrypted password)
+mkAuthCredentials pwd = do
   hf <- authHash
-  h <- liftIO $ buildSaltAndHash hf password
-  addUser user h params
+  SaltedHash (Salt s) pwd' <- liftIO $ buildSaltAndHash hf pwd
+  return $ (B.pack s, B.pack pwd')
+
+
+------------------------------------------------------------------------------
+-- | True if a user is present in current session.
+isLoggedIn :: MonadAuth m => m Bool
+isLoggedIn = getCurrentUserId >>= return . maybe False (const True)
 
 
 ------------------------------------------------------------------------------
 -- | Get the current 'User' if authenticated, 'Nothing' otherwise.
--- 
--- This is the primary way to check whether an authenticated 'User' is present
--- in your handlers.
 currentUser :: MonadAuth m => m (Maybe User)
 currentUser = getCurrentUserId >>= maybe (return Nothing) getUserInternal
 
