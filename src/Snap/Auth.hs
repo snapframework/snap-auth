@@ -36,6 +36,7 @@ import           Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString as B
 import           Data.Generics hiding ((:+:))
 import qualified Data.Map as M
+import           Data.Time
 
 import           Snap.Auth.Password
 import           Snap.Types
@@ -72,14 +73,50 @@ data User = User
   { userId :: UserId
   , userEncryptedPassword :: ByteString
   , userSalt :: ByteString
-  } deriving (Read,Show,Ord,Eq,Typeable,Data)
+  , userActivatedAt :: Maybe UTCTime
+  , userSuspendedAt :: Maybe UTCTime
+  , userPerishableToken :: ByteString
+  , userPersistanceToken :: ByteString
+  , userSingleAccessToken :: ByteString
+  , userLoginCount :: Int
+  , userFailedLoginCount :: Int
+  , userLastRequest :: Maybe UTCTime
+  , userCurrentLogin :: Maybe UTCTime
+  , userLastLogin :: Maybe UTCTime
+  , userCurrentLoginIp :: Maybe Int
+  , userLastLoginIp :: Maybe Int
+  } deriving (Read,Show,Ord,Eq)
+
+
+------------------------------------------------------------------------------
+-- | A blank 'User' as a starting point
+emptyUser = User
+  { userId = UserId ""
+  , userEncryptedPassword = ""
+  , userSalt = ""
+  , userActivatedAt = Nothing
+  , userSuspendedAt = Nothing
+  , userPerishableToken = ""
+  , userPersistanceToken = ""
+  , userSingleAccessToken = ""
+  , userLoginCount = 0
+  , userFailedLoginCount = 0
+  , userLastRequest = Nothing
+  , userCurrentLogin = Nothing
+  , userLastLogin = Nothing
+  , userCurrentLoginIp = Nothing
+  , userLastLoginIp = Nothing
+  } 
+
 
 ------------------------------------------------------------------------------
 -- | Make 'SaltedHash' from 'User'
 mkSaltedHash :: User -> SaltedHash
-mkSaltedHash (User _ p s) = SaltedHash s' p'
+mkSaltedHash u = SaltedHash s' p'
   where s' = Salt (B.unpack s)
         p' = B.unpack p
+        p = userEncryptedPassword u
+        s = userSalt u
 
 ------------------------------------------------------------------------------
 -- | Typeclass for authentication and user session functionality.
