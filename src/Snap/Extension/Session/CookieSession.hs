@@ -27,6 +27,7 @@ module Snap.Extension.Session.CookieSession
       , setSession
       , getFromSession
       , setInSession
+      , deleteFromSession
       , touchSession
       , clearSession
       , getSessionUserId

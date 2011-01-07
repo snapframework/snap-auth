@@ -1,6 +1,7 @@
 module Snap.Extension.Session.Types where
 
 import Data.ByteString (ByteString)
+import Data.Generics
 import qualified Data.Map as Map
 import Data.Map (Map)
 import Data.Serialize
@@ -12,7 +13,7 @@ import Data.Serialize
 -- Think of this type as a secure, authenticated user. You should normally
 -- never see this type unless a user has been authenticated.
 newtype UserId = UserId { unUid :: ByteString }
-    deriving (Read,Show,Ord,Eq)
+    deriving (Read,Show,Ord,Eq,Typeable,Data)
 
 
 ------------------------------------------------------------------------------

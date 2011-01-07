@@ -13,16 +13,19 @@ module Snap.Auth
   , authLogin
   , performLogout
   , requireUser
-  , currentUser
+  , currentAuthUser
   , isLoggedIn
 
   -- * MonadAuth Class
   , MonadAuth(..)
+  , MonadAuthUser(..)
 
   -- * Types
+  , AuthUser(..)
+  , emptyAuthUser
   , UserId(..)
   , ExternalUserId(..)
-  , User(..)
+  , Password(..)
 
   -- * Crypto Stuff You May Need
   , HashFunc
@@ -31,92 +34,126 @@ module Snap.Auth
 
 import           Maybe
 
+import           Control.Applicative
 import           Control.Monad.Reader
 import           Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString as B
-import           Data.Generics hiding ((:+:))
-import qualified Data.Map as M
 import           Data.Time
 
 import           Snap.Auth.Password
 import           Snap.Types
 import           Snap.Extension.Session
-
-
-------------------------------------------------------------------------------
--- | Internal representation of a 'User'. By convention, we demand that the
--- application is able to directly fetch a 'User' using this identifier.
---
--- Think of this type as a secure, authenticated user. You should normally
--- never see this type unless a user has been authenticated.
-newtype UserId = UserId { unUid :: ByteString }
-    deriving (Read,Show,Ord,Eq,Typeable,Data)
-
+import           Snap.Extension.Session.Types
 
 ------------------------------------------------------------------------------
--- | External / end-user-facing identifier for a 'User'. 
+-- | External / end-user-facing identifier for a 'AuthUser'. 
 --
 -- For example, this could be a (\"username\", \"john.doe\") pair submitted
 -- through a web form.
 newtype ExternalUserId = EUId { unEuid :: Params } 
-    deriving (Read,Show,Ord,Eq,Typeable,Data)
+    deriving (Read,Show,Ord,Eq)
 
 
 ------------------------------------------------------------------------------
+-- | Password is clear when supplied by the user and encrypted later when
+-- returned from the db.
+data Password = ClearText ByteString
+              | Encrypted ByteString
+              deriving (Read, Show, Ord, Eq)
+
+------------------------------------------------------------------------------
 -- | Type representing the concept of a User in your application.
---
--- At a minimum, we require that your users have a unique internal identifier
--- and a scrambled password field. It may also have a parametric field that you
--- can define so that you have access to additional information that your
--- application may require. 
-data User = User 
-  { userId :: UserId
-  , userEncryptedPassword :: ByteString
-  , userSalt :: ByteString
+data AuthUser = AuthUser 
+  { userId :: Maybe UserId
+  , userEmail :: Maybe ByteString
+  , userPassword :: Maybe Password
+  , userSalt :: Maybe ByteString
   , userActivatedAt :: Maybe UTCTime
   , userSuspendedAt :: Maybe UTCTime
-  , userPerishableToken :: ByteString
-  , userPersistanceToken :: ByteString
-  , userSingleAccessToken :: ByteString
-  , userLoginCount :: Int
-  , userFailedLoginCount :: Int
-  , userLastRequest :: Maybe UTCTime
-  , userCurrentLogin :: Maybe UTCTime
-  , userLastLogin :: Maybe UTCTime
-  , userCurrentLoginIp :: Maybe Int
-  , userLastLoginIp :: Maybe Int
+  {-, userPerishableToken :: Maybe ByteString-}
+  {-, userPersistanceToken :: Maybe ByteString-}
+  {-, userSingleAccessToken :: Maybe ByteString-}
+  {-, userLoginCount :: Int-}
+  {-, userFailedLoginCount :: Int-}
+  {-, userLastRequest :: Maybe UTCTime-}
+  {-, userCurrentLogin :: Maybe UTCTime-}
+  {-, userLastLogin :: Maybe UTCTime-}
+  {-, userCurrentLoginIp :: Maybe Int-}
+  {-, userLastLoginIp :: Maybe Int-}
+  , userCreatedAt :: Maybe UTCTime
+  , userUpdatedAt :: Maybe UTCTime
   } deriving (Read,Show,Ord,Eq)
 
 
 ------------------------------------------------------------------------------
 -- | A blank 'User' as a starting point
-emptyUser = User
-  { userId = UserId ""
-  , userEncryptedPassword = ""
-  , userSalt = ""
+emptyAuthUser :: AuthUser
+emptyAuthUser = AuthUser
+  { userId = Nothing
+  , userEmail = Nothing
+  , userPassword = Nothing
+  , userSalt = Nothing
   , userActivatedAt = Nothing
   , userSuspendedAt = Nothing
-  , userPerishableToken = ""
-  , userPersistanceToken = ""
-  , userSingleAccessToken = ""
-  , userLoginCount = 0
-  , userFailedLoginCount = 0
-  , userLastRequest = Nothing
-  , userCurrentLogin = Nothing
-  , userLastLogin = Nothing
-  , userCurrentLoginIp = Nothing
-  , userLastLoginIp = Nothing
+  {-, userPerishableToken = Nothing-}
+  {-, userPersistanceToken = Nothing-}
+  {-, userSingleAccessToken = Nothing-}
+  {-, userLoginCount = 0-}
+  {-, userFailedLoginCount = 0-}
+  {-, userLastRequest = Nothing-}
+  {-, userCurrentLogin = Nothing-}
+  {-, userLastLogin = Nothing-}
+  {-, userCurrentLoginIp = Nothing-}
+  {-, userLastLoginIp = Nothing-}
+  , userCreatedAt = Nothing
+  , userUpdatedAt = Nothing
   } 
 
 
 ------------------------------------------------------------------------------
--- | Make 'SaltedHash' from 'User'
-mkSaltedHash :: User -> SaltedHash
-mkSaltedHash u = SaltedHash s' p'
-  where s' = Salt (B.unpack s)
-        p' = B.unpack p
-        p = userEncryptedPassword u
-        s = userSalt u
+-- | Make 'SaltedHash' from 'AuthUser'
+mkSaltedHash :: AuthUser -> Maybe SaltedHash
+mkSaltedHash u = SaltedHash <$> s <*> p'
+  where s = (Salt . B.unpack) <$> userSalt u
+        p' = fmap B.unpack p
+        p = do
+          pm <- userPassword u 
+          case pm of
+            ClearText x -> Nothing
+            Encrypted x -> Just x
+
+
+
+class (MonadAuth m) => MonadAuthUser m t | m -> t where
+
+    --------------------------------------------------------------------------
+    -- | Define a function that can resolve to a 'AuthUser' from an internal
+    -- 'UserId'. 
+    --
+    -- The 'UserId' is persisted in your application's session
+    -- to check for the existence of an authenticated user in your handlers.
+    -- A typical 'UserId' would be the unique database key given to your user's
+    -- record.
+    getUserInternal :: UserId -> m (Maybe (AuthUser, t))
+
+
+    --------------------------------------------------------------------------
+    -- | Define a function that can resolve to a 'AuthUser' using the external,
+    -- user supplied 'ExternalUserId' identifier. 
+    --
+    -- This is typically passed directly from the POST request.
+    getUserExternal :: ExternalUserId -> m (Maybe (AuthUser, t))
+
+
+    --------------------------------------------------------------------------
+    -- | Implement a way to save given user in the DB.
+    saveAuthUser :: (AuthUser, t) -> m (Maybe AuthUser)
+  
+
+
+
+
+
 
 ------------------------------------------------------------------------------
 -- | Typeclass for authentication and user session functionality.
@@ -139,58 +176,36 @@ class (MonadSnap m, MonadSession m) => MonadAuth m where
     authHash = return defaultHash 
 
 
-    --------------------------------------------------------------------------
-    -- | Define a function that can resolve to a 'User' from an internal
-    -- 'UserId'. 
-    --
-    -- The 'UserId' is persisted in your application's session
-    -- to check for the existence of an authenticated user in your handlers.
-    -- A typical 'UserId' would be the unique database key given to your user's
-    -- record.
-    getUserInternal :: UserId -> m (Maybe User)
+    authUserTable :: m String
+    authUserTable = return "users"
 
 
-    --------------------------------------------------------------------------
-    -- | Define a function that can resolve to a 'User' using the external, user
-    -- supplied 'ExternalUserId' identifier. 
-    --
-    -- This is typically passed directly from the POST request.
-    getUserExternal :: ExternalUserId -> m (Maybe User)
+    authPasswordRange :: m (Int, Int)
+    authPasswordRange = return (7, 25)
 
 
-    --------------------------------------------------------------------------
-    -- | Persist the given 'UserId' identifier in your session so that it can
-    -- later be accessed using 'currentUser'. A default is included using
-    -- Snap.Extension.Session.
-    --
-    -- Please note that this is the primary way of logging a user in.  Once the
-    -- the user's id has been persisted this way, 'currentUser' method will
-    -- return the 'User' associated with this id.
-    --
-    -- If the given value is 'Nothing', your application should interpret it as
-    -- removing the UserId from the session.
-    --
-    -- This function will be made obsolete once we figure out a standardized
-    -- way to handle session persistence. snap-auth will then do it for you.
-    setCurrentUserId :: Maybe UserId -> m ()
-    setCurrentUserId u = do
-      s <- getSession 
-      let ns = maybe (M.delete "sauth_user_id" s) 
-                     (\u' -> M.insert "sauth_user_id" (unUid u') s) 
-                     u
-      setSession ns
+    authAuthenticationKeys :: m [ByteString]
+    authAuthenticationKeys = return ["email"]
 
 
-    --------------------------------------------------------------------------
-    -- | If the user is authenticated, the 'UserId' should be persisted
-    -- somewhere in your session through the first 'setCurrentUserId' call.
-    -- A default is included using Snap.Extension.Session.
-    --
-    -- This function will be made obsolete once we figure out a standardized
-    -- way to handle session persistence. snap-auth will then do it for you.
-    getCurrentUserId :: m (Maybe UserId)
-    getCurrentUserId = getSession 
-                       >>= return . fmap UserId . M.lookup "sauth_user_id"
+    -- | Remember period in seconds. Defaults to 2 weeks.
+    authRememberPeriod :: m Int
+    authRememberPeriod = return $ 60 * 60 * 24 * 14
+
+
+    authRememberAcrossBrowsers :: m Bool
+    authRememberAcrossBrowsers = return True
+
+
+    authEmailValidationRegex :: m ByteString
+    authEmailValidationRegex = 
+      return "^([\\w\\.%\\+\\-]+)@([\\w\\-]+\\.)+([\\w]{2,})$"
+
+
+    -- | Lockout after x tries, re-allow entry after y seconds
+    authLockoutStrategy :: m (Maybe (Int, Int))
+    authLockoutStrategy = return Nothing
+
 
 
 ------------------------------------------------------------------------------
@@ -199,17 +214,17 @@ class (MonadSnap m, MonadSession m) => MonadAuth m where
 -- Returns the internal 'UserId' if successful, 'Nothing' otherwise.
 -- Note that this will not persist the authentication. See 'performLogin' for
 -- that.
-authenticate :: MonadAuth m 
+authenticate :: MonadAuthUser m t
              => ExternalUserId        -- ^ External user identifiers
              -> ByteString            -- ^ Password
-             -> m (Maybe UserId)      -- ^ Internal ID of user if match exists.
+             -> m (Maybe (AuthUser, t))      
 authenticate uid password = do
     hf <- authHash
     user <- getUserExternal uid
     authSucc <- return $ fromMaybe False $
-        fmap (checkSalt hf password) (fmap mkSaltedHash user)
+        fmap (checkSalt hf password) (fmap fst user >>= mkSaltedHash )
     return $ case authSucc of
-      True -> fmap userId user
+      True -> user
       False -> Nothing
 
 
@@ -223,24 +238,27 @@ authenticate uid password = do
 ------------------------------------------------------------------------------
 -- | Given an 'ExternalUserId', authenticates the user and persists the
 -- authentication in the session if successful. 
-authLogin :: MonadAuth m 
+authLogin :: MonadAuthUser m t
           => ExternalUserId        -- ^ External user identifiers
           -> ByteString            -- ^ Password
-          -> m (Maybe UserId)      -- ^ Internal ID of user if match exists.
+          -> m (Maybe (AuthUser, t))      
 authLogin euid p = authenticate euid p >>= maybe (return Nothing) login
-  where login uid = setCurrentUserId (Just uid) >> return (Just uid)
+  where 
+    login x@(user, _) = do
+      setSessionUserId (userId user) 
+      return (Just x)
 
 
 ------------------------------------------------------------------------------
 -- | Logs a user out from the current session.
-performLogout :: MonadAuth m => m ()
-performLogout = setCurrentUserId Nothing
+performLogout :: MonadAuthUser m t => m ()
+performLogout = setSessionUserId Nothing
 
 
 ------------------------------------------------------------------------------
 -- | Takes a clean-text password and returns a fresh pair of password and salt
 -- to be stored in your app's DB.
-mkAuthCredentials :: MonadAuth m
+mkAuthCredentials :: MonadAuthUser m t
                   => ByteString                   
                   -- ^ A given password
                   -> m (ByteString, ByteString)   
@@ -253,24 +271,24 @@ mkAuthCredentials pwd = do
 
 ------------------------------------------------------------------------------
 -- | True if a user is present in current session.
-isLoggedIn :: MonadAuth m => m Bool
-isLoggedIn = getCurrentUserId >>= return . maybe False (const True)
+isLoggedIn :: MonadAuthUser m t => m Bool
+isLoggedIn = getSessionUserId >>= return . maybe False (const True)
 
 
 ------------------------------------------------------------------------------
--- | Get the current 'User' if authenticated, 'Nothing' otherwise.
-currentUser :: MonadAuth m => m (Maybe User)
-currentUser = getCurrentUserId >>= maybe (return Nothing) getUserInternal
+-- | Get the current 'AuthUser' if authenticated, 'Nothing' otherwise.
+currentAuthUser :: MonadAuthUser m t => m (Maybe (AuthUser, t))
+currentAuthUser = getSessionUserId >>= maybe (return Nothing) getUserInternal
 
 
 ------------------------------------------------------------------------------
--- | Require that an authenticated 'User' is present in the current session.
+-- | Require that an authenticated 'AuthUser' is present in the current session.
 --
 -- This function has no DB cost - only checks to see if a user_id is present in
 -- the current session.
-requireUser :: MonadAuth m => m a   
+requireUser :: MonadAuthUser m t => m a   
             -- ^ Do this if no authenticated user is present.
             -> m a    
             -- ^ Do this if an authenticated user is present.
             -> m a
-requireUser bad good = getCurrentUserId >>= maybe bad (const good)
+requireUser bad good = getSessionUserId >>= maybe bad (const good)

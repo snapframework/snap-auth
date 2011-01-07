@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 {-|
 
   Provides generic, somewhat customizable handlers that can be plugged 
@@ -16,9 +14,7 @@ module Snap.Auth.Handlers
   , logoutHandler
   ) where
 
-import Control.Monad (liftM2)
 import Data.ByteString (ByteString)
-import Data.Maybe (fromMaybe)
 
 import Snap.Types
 import Snap.Auth
@@ -28,7 +24,8 @@ import Snap.Auth
 --
 -- The request paremeters are passed to 'authLogin' function as
 -- 'ExternalUserId'.
-loginHandler :: MonadAuth m => ByteString 
+loginHandler :: MonadAuthUser m t 
+             => ByteString 
              -- ^ The password param field
              -> m a 
              -- ^ Upon failure
@@ -36,16 +33,17 @@ loginHandler :: MonadAuth m => ByteString
              -- ^ Upon success
              -> m a
 loginHandler pwdf loginFailure loginSuccess = do
-    euid <- getRequest >>= return . return . EUId . rqParams
+    euid <- getParams >>= return . EUId 
     password <- getParam pwdf
-    mMatch <- fromMaybe (return Nothing) $
-        liftM2 authLogin euid password
+    mMatch <- case password of
+      Nothing -> return Nothing
+      Just p -> authLogin euid p
     maybe loginFailure (const loginSuccess) mMatch
 
 
 ------------------------------------------------------------------------------
 -- | Simple handler to log the user out. Deletes user from session.
-logoutHandler :: MonadAuth m 
+logoutHandler :: MonadAuthUser m t
               => m a 
               -- ^ What to do after logging out
               -> m a
