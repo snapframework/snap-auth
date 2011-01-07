@@ -1,6 +1,11 @@
 :set -XOverloadedStrings
+:set -XGeneralizedNewtypeDeriving
+:set -XDeriveDataTypeable
+:set -XMultiParamTypeClasses
+:set -XFunctionalDependencies
 :set -Wall
 :set -isrc
 :set -itest/suite
-:set -hide-package mtl
-:set -hide-package MonadCatchIO-mtl
+:set -hide-package monads-tf
+:set -hide-package monads-fd
+
