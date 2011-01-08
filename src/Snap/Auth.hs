@@ -73,8 +73,8 @@ data AuthUser = AuthUser
   {-, userPerishableToken :: Maybe ByteString-}
   {-, userPersistanceToken :: Maybe ByteString-}
   {-, userSingleAccessToken :: Maybe ByteString-}
-  {-, userLoginCount :: Int-}
-  {-, userFailedLoginCount :: Int-}
+  , userLoginCount :: Int
+  , userFailedLoginCount :: Int
   {-, userLastRequest :: Maybe UTCTime-}
   {-, userCurrentLogin :: Maybe UTCTime-}
   {-, userLastLogin :: Maybe UTCTime-}
@@ -98,8 +98,8 @@ emptyAuthUser = AuthUser
   {-, userPerishableToken = Nothing-}
   {-, userPersistanceToken = Nothing-}
   {-, userSingleAccessToken = Nothing-}
-  {-, userLoginCount = 0-}
-  {-, userFailedLoginCount = 0-}
+  , userLoginCount = 0
+  , userFailedLoginCount = 0
   {-, userLastRequest = Nothing-}
   {-, userCurrentLogin = Nothing-}
   {-, userLastLogin = Nothing-}
@@ -112,15 +112,16 @@ emptyAuthUser = AuthUser
 
 ------------------------------------------------------------------------------
 -- | Make 'SaltedHash' from 'AuthUser'
-mkSaltedHash :: AuthUser -> Maybe SaltedHash
-mkSaltedHash u = SaltedHash <$> s <*> p'
-  where s = (Salt . B.unpack) <$> userSalt u
-        p' = fmap B.unpack p
-        p = do
-          pm <- userPassword u 
-          case pm of
-            ClearText x -> Nothing
-            Encrypted x -> Just x
+mkSaltedHash :: AuthUser -> SaltedHash
+mkSaltedHash u = SaltedHash s p'
+  where s = Salt . B.unpack $ s'
+        s' = maybe (error "No user salt") id $ userSalt u
+        p' = case p of 
+          ClearText x -> 
+            error "Can't mkSaltedHash with a ClearText user password"
+          Encrypted x -> B.unpack x
+        p = maybe (error "Can't mkSaltedHash with empty password") id $ 
+            userPassword u
 
 
 
@@ -221,13 +222,22 @@ authenticate :: MonadAuthUser m t
 authenticate uid password = do
     hf <- authHash
     user <- getUserExternal uid
-    authSucc <- return $ fromMaybe False $
-        fmap (checkSalt hf password) (fmap fst user >>= mkSaltedHash )
-    return $ case authSucc of
-      True -> user
-      False -> Nothing
-
-
+    case user of
+      Nothing -> return Nothing
+      Just user'@(u', _) -> case check hf password u' of
+        True -> do
+          incrementLoginCounter user'
+          return user
+        False -> do
+          incrementFailedLoginCounter user'
+          return Nothing
+    where
+      check hf p u = checkSalt hf p $ mkSaltedHash u
+      incrementLoginCounter usr@(u, d) = saveAuthUser (u', d)
+        where u' = u { userLoginCount = userLoginCount u + 1 }
+      incrementFailedLoginCounter usr@(u, d) = saveAuthUser (u', d)
+        where u' = u { userFailedLoginCount = userFailedLoginCount u + 1 }
+        
 
 -- $higherlevel
 -- These are the key functions you will use in your handlers. Once you have set
