@@ -75,11 +75,10 @@ data AuthUser = AuthUser
   {-, userSingleAccessToken :: Maybe ByteString-}
   , userLoginCount :: Int
   , userFailedLoginCount :: Int
-  {-, userLastRequest :: Maybe UTCTime-}
-  {-, userCurrentLogin :: Maybe UTCTime-}
-  {-, userLastLogin :: Maybe UTCTime-}
-  {-, userCurrentLoginIp :: Maybe Int-}
-  {-, userLastLoginIp :: Maybe Int-}
+  , userCurrentLoginAt :: Maybe UTCTime
+  , userLastLoginAt :: Maybe UTCTime
+  , userCurrentLoginIp :: Maybe ByteString
+  , userLastLoginIp :: Maybe ByteString
   , userCreatedAt :: Maybe UTCTime
   , userUpdatedAt :: Maybe UTCTime
   } deriving (Read,Show,Ord,Eq)
@@ -100,11 +99,10 @@ emptyAuthUser = AuthUser
   {-, userSingleAccessToken = Nothing-}
   , userLoginCount = 0
   , userFailedLoginCount = 0
-  {-, userLastRequest = Nothing-}
-  {-, userCurrentLogin = Nothing-}
-  {-, userLastLogin = Nothing-}
-  {-, userCurrentLoginIp = Nothing-}
-  {-, userLastLoginIp = Nothing-}
+  , userCurrentLoginAt = Nothing
+  , userLastLoginAt = Nothing
+  , userCurrentLoginIp = Nothing
+  , userLastLoginIp = Nothing
   , userCreatedAt = Nothing
   , userUpdatedAt = Nothing
   } 
@@ -226,17 +224,43 @@ authenticate uid password = do
       Nothing -> return Nothing
       Just user'@(u', _) -> case check hf password u' of
         True -> do
-          incrementLoginCounter user'
+          markLogin user'
           return user
         False -> do
-          incrementFailedLoginCounter user'
+          markLoginFail user'
           return Nothing
     where
       check hf p u = checkSalt hf p $ mkSaltedHash u
-      incrementLoginCounter usr@(u, d) = saveAuthUser (u', d)
-        where u' = u { userLoginCount = userLoginCount u + 1 }
-      incrementFailedLoginCounter usr@(u, d) = saveAuthUser (u', d)
-        where u' = u { userFailedLoginCount = userFailedLoginCount u + 1 }
+
+      markLoginFail (u,d) = do
+        u' <- incFailLogCtr u
+        saveAuthUser (u', d)
+
+      markLogin :: (MonadAuthUser m t) => (AuthUser, t) -> m (Maybe AuthUser)
+      markLogin (u,d) = do
+        u' <- (incLogCtr >=> updateIP >=> updateLoginTS) u
+        saveAuthUser (u', d)
+
+      incLogCtr :: (MonadAuthUser m t) => AuthUser -> m AuthUser
+      incLogCtr u = return $ u { userLoginCount = userLoginCount u + 1 }
+
+      incFailLogCtr :: (MonadAuthUser m t) => AuthUser -> m AuthUser
+      incFailLogCtr u = return $
+        u { userFailedLoginCount = userFailedLoginCount u + 1 }
+
+      updateIP :: (MonadAuthUser m t) => AuthUser -> m AuthUser
+      updateIP u = do
+        ip <- getRequest >>= return . rqRemoteAddr
+        return $
+          u { userCurrentLoginIp = Just ip
+            , userLastLoginIp = userCurrentLoginIp u }
+
+      updateLoginTS :: (MonadAuthUser m t) => AuthUser -> m AuthUser
+      updateLoginTS u = do
+        t <- liftIO getCurrentTime
+        return $ 
+          u { userCurrentLoginAt = Just t
+            , userLastLoginAt = userCurrentLoginAt u }
         
 
 -- $higherlevel
