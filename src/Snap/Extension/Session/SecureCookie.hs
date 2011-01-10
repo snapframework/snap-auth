@@ -9,7 +9,7 @@
     
     * Check the timestamp for session expiration everytime you read from the
     cookie. This will limit intercept-and-replay attacks by disallowing cookies
-    older than the timeout threshould from being effective in your application.
+    older than the timeout threshold. 
 
 -}
 
@@ -47,7 +47,7 @@ type SecureCookie t = (UTCTime, t)
 getSecureCookie :: (MonadSnap m, Serialize t) 
                 => ByteString       -- ^ Cookie name
                 -> Key              -- ^ Encryption key
-                -> Maybe Int        -- ^ Timeout
+                -> Maybe Int        -- ^ Timeout in seconds
                 -> m (Maybe t)
 getSecureCookie name key timeout = do
     rqCookie <- getCookie name
@@ -70,11 +70,13 @@ setSecureCookie :: (MonadSnap m, Serialize t)
                 => ByteString       -- ^ Cookie name
                 -> Key              -- ^ Encryption key 
                 -> t                -- ^ Serializable payload
+                -> Maybe Int        -- ^ Max age in seconds
                 -> m ()
-setSecureCookie name key val = do
+setSecureCookie name key val to = do
     t <- liftIO getCurrentTime
+    let expire = to >>= Just . flip addUTCTime t . fromIntegral
     let val' = encrypt key . encode $ (t, val)
-    let nc = Cookie name val' Nothing Nothing (Just "/")
+    let nc = Cookie name val' expire Nothing (Just "/")
     modifyResponse $ addResponseCookie nc
 
 
@@ -90,4 +92,4 @@ checkTimeout (Just x) t0 =
   let x' = fromIntegral x
   in do
       t1 <- liftIO getCurrentTime
-      return $ t1 > addUTCTime (x' * 60) t0
+      return $ t1 > addUTCTime x' t0

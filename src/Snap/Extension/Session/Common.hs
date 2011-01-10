@@ -15,9 +15,9 @@ import qualified Data.ByteString.Char8 as B
 
 ------------------------------------------------------------------------------
 -- | Generates a random salt.
-randomToken :: IO ByteString
-randomToken = do
-    chars <- sequence $ take 15 $ repeat $
+randomToken :: Int -> IO ByteString
+randomToken n = do
+    chars <- sequence $ take n $ repeat $
         randomRIO (0::Int,15) >>= return . flip showHex ""
     return $ B.pack $ concat chars
 

@@ -10,11 +10,11 @@ module Snap.Auth
   -- * Higher Level Functions
   -- $higherlevel
     mkAuthCredentials
-  , authLogin
+  , performLogin
   , performLogout
-  , requireUser
   , currentAuthUser
   , isLoggedIn
+  , authenticatedUserId
 
   -- * MonadAuth Class
   , MonadAuth(..)
@@ -43,6 +43,8 @@ import           Data.Time
 import           Snap.Auth.Password
 import           Snap.Types
 import           Snap.Extension.Session
+import           Snap.Extension.Session.Common
+import           Snap.Extension.Session.SecureCookie
 import           Snap.Extension.Session.Types
 
 ------------------------------------------------------------------------------
@@ -71,7 +73,7 @@ data AuthUser = AuthUser
   , userActivatedAt :: Maybe UTCTime
   , userSuspendedAt :: Maybe UTCTime
   {-, userPerishableToken :: Maybe ByteString-}
-  {-, userPersistanceToken :: Maybe ByteString-}
+  , userPersistenceToken :: Maybe ByteString
   {-, userSingleAccessToken :: Maybe ByteString-}
   , userLoginCount :: Int
   , userFailedLoginCount :: Int
@@ -95,7 +97,7 @@ emptyAuthUser = AuthUser
   , userActivatedAt = Nothing
   , userSuspendedAt = Nothing
   {-, userPerishableToken = Nothing-}
-  {-, userPersistanceToken = Nothing-}
+  , userPersistenceToken = Nothing
   {-, userSingleAccessToken = Nothing-}
   , userLoginCount = 0
   , userFailedLoginCount = 0
@@ -145,13 +147,14 @@ class (MonadAuth m) => MonadAuthUser m t | m -> t where
 
 
     --------------------------------------------------------------------------
+    -- | A way to find users by the remember token.
+    getUserByRememberToken :: ByteString -> m (Maybe (AuthUser, t))
+
+
+    --------------------------------------------------------------------------
     -- | Implement a way to save given user in the DB.
     saveAuthUser :: (AuthUser, t) -> m (Maybe AuthUser)
   
-
-
-
-
 
 
 ------------------------------------------------------------------------------
@@ -175,16 +178,25 @@ class (MonadSnap m, MonadSession m) => MonadAuth m where
     authHash = return defaultHash 
 
 
+    -- | Name of the table that will store user data   
     authUserTable :: m String
     authUserTable = return "users"
 
 
+    -- | Password length range
     authPasswordRange :: m (Int, Int)
     authPasswordRange = return (7, 25)
 
 
+    -- | What are the database fields and the user-supplied ExternalUserId
+    -- fields that are going to be used to find a user?
     authAuthenticationKeys :: m [ByteString]
     authAuthenticationKeys = return ["email"]
+
+    
+    -- | Cookie name for the remember token
+    authRememberCookieName :: m ByteString
+    authRememberCookieName = return "auth_remember_token"
 
 
     -- | Remember period in seconds. Defaults to 2 weeks.
@@ -192,6 +204,7 @@ class (MonadSnap m, MonadSession m) => MonadAuth m where
     authRememberPeriod = return $ 60 * 60 * 24 * 14
 
 
+    -- | Should it be possible to login multiple times?
     authRememberAcrossBrowsers :: m Bool
     authRememberAcrossBrowsers = return True
 
@@ -216,8 +229,9 @@ class (MonadSnap m, MonadSession m) => MonadAuth m where
 authenticate :: MonadAuthUser m t
              => ExternalUserId        -- ^ External user identifiers
              -> ByteString            -- ^ Password
+             -> Bool                  -- ^ Remember user?
              -> m (Maybe (AuthUser, t))      
-authenticate uid password = do
+authenticate uid password remember = do
     hf <- authHash
     user <- getUserExternal uid
     case user of
@@ -238,7 +252,8 @@ authenticate uid password = do
 
       markLogin :: (MonadAuthUser m t) => (AuthUser, t) -> m (Maybe AuthUser)
       markLogin (u,d) = do
-        u' <- (incLogCtr >=> updateIP >=> updateLoginTS) u
+        u' <- (incLogCtr >=> updateIP >=> updateLoginTS >=> 
+               setPersistenceToken) u
         saveAuthUser (u', d)
 
       incLogCtr :: (MonadAuthUser m t) => AuthUser -> m AuthUser
@@ -261,6 +276,22 @@ authenticate uid password = do
         return $ 
           u { userCurrentLoginAt = Just t
             , userLastLoginAt = userCurrentLoginAt u }
+
+      setPersistenceToken u = do
+        multi_logon <- authRememberAcrossBrowsers
+        to <- authRememberPeriod
+        site_key <- secureSiteKey
+        cn <- authRememberCookieName
+        rt <- liftIO $ randomToken 15
+        token <- case userPersistenceToken u of
+          Nothing -> return rt
+          Just x -> if multi_logon then return x else return rt
+        case remember of
+          False -> return u
+          True -> do
+            setSecureCookie cn site_key token (Just to)
+            return $ u { userPersistenceToken = Just token }
+
         
 
 -- $higherlevel
@@ -272,11 +303,12 @@ authenticate uid password = do
 ------------------------------------------------------------------------------
 -- | Given an 'ExternalUserId', authenticates the user and persists the
 -- authentication in the session if successful. 
-authLogin :: MonadAuthUser m t
-          => ExternalUserId        -- ^ External user identifiers
-          -> ByteString            -- ^ Password
-          -> m (Maybe (AuthUser, t))      
-authLogin euid p = authenticate euid p >>= maybe (return Nothing) login
+performLogin :: MonadAuthUser m t
+             => ExternalUserId        -- ^ External user identifiers
+             -> ByteString            -- ^ Password
+             -> Bool                  -- ^ Remember user?
+             -> m (Maybe (AuthUser, t))      
+performLogin euid p r = authenticate euid p r >>= maybe (return Nothing) login
   where 
     login x@(user, _) = do
       setSessionUserId (userId user) 
@@ -286,7 +318,11 @@ authLogin euid p = authenticate euid p >>= maybe (return Nothing) login
 ------------------------------------------------------------------------------
 -- | Logs a user out from the current session.
 performLogout :: MonadAuthUser m t => m ()
-performLogout = setSessionUserId Nothing
+performLogout = do
+  cn <- authRememberCookieName
+  let ck = Cookie cn "" Nothing Nothing (Just "/")
+  modifyResponse $ addResponseCookie ck
+  setSessionUserId Nothing
 
 
 ------------------------------------------------------------------------------
@@ -306,23 +342,32 @@ mkAuthCredentials pwd = do
 ------------------------------------------------------------------------------
 -- | True if a user is present in current session.
 isLoggedIn :: MonadAuthUser m t => m Bool
-isLoggedIn = getSessionUserId >>= return . maybe False (const True)
+isLoggedIn = authenticatedUserId >>= return . maybe False (const True)
 
 
 ------------------------------------------------------------------------------
 -- | Get the current 'AuthUser' if authenticated, 'Nothing' otherwise.
 currentAuthUser :: MonadAuthUser m t => m (Maybe (AuthUser, t))
-currentAuthUser = getSessionUserId >>= maybe (return Nothing) getUserInternal
+currentAuthUser = authenticatedUserId >>= maybe (return Nothing) getUserInternal
 
 
 ------------------------------------------------------------------------------
--- | Require that an authenticated 'AuthUser' is present in the current session.
---
--- This function has no DB cost - only checks to see if a user_id is present in
--- the current session.
-requireUser :: MonadAuthUser m t => m a   
-            -- ^ Do this if no authenticated user is present.
-            -> m a    
-            -- ^ Do this if an authenticated user is present.
-            -> m a
-requireUser bad good = getSessionUserId >>= maybe bad (const good)
+-- | Return if there is an authenticated user id. Try to remember the user
+-- if possible.
+authenticatedUserId :: MonadAuthUser m t => m (Maybe UserId)
+authenticatedUserId = getSessionUserId >>= maybe rememberUser (return . Just)
+
+------------------------------------------------------------------------------
+-- | Remember user from remember token if possible.
+rememberUser :: MonadAuthUser m t => m (Maybe UserId)
+rememberUser = do
+  to <- authRememberPeriod
+  key <- secureSiteKey
+  cn <- authRememberCookieName
+  remToken <- getSecureCookie cn key (Just to)
+  u <- maybe (return Nothing) getUserByRememberToken remToken
+  case u of
+    Nothing -> return Nothing
+    Just (au, _) -> do 
+      setSessionUserId $ userId au
+      return $ userId au

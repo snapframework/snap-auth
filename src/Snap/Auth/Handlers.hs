@@ -12,6 +12,7 @@
 module Snap.Auth.Handlers 
   ( loginHandler
   , logoutHandler
+  , requireUser
   ) where
 
 import Data.ByteString (ByteString)
@@ -22,22 +23,25 @@ import Snap.Auth
 ------------------------------------------------------------------------------
 -- | A 'MonadSnap' handler that processes a login form. 
 --
--- The request paremeters are passed to 'authLogin' function as
--- 'ExternalUserId'.
+-- The request paremeters are passed to 'performLogin'
 loginHandler :: MonadAuthUser m t 
              => ByteString 
              -- ^ The password param field
+             -> Maybe ByteString
+             -- ^ Remember field; Nothing if you want to remember function.
              -> m a 
              -- ^ Upon failure
              -> m a 
              -- ^ Upon success
              -> m a
-loginHandler pwdf loginFailure loginSuccess = do
+loginHandler pwdf remf loginFailure loginSuccess = do
     euid <- getParams >>= return . EUId 
     password <- getParam pwdf
+    remember <- maybe (return Nothing) getParam remf
+    let r = maybe False (=="1") remember
     mMatch <- case password of
       Nothing -> return Nothing
-      Just p -> authLogin euid p
+      Just p -> performLogin euid p r
     maybe loginFailure (const loginSuccess) mMatch
 
 
@@ -48,3 +52,16 @@ logoutHandler :: MonadAuthUser m t
               -- ^ What to do after logging out
               -> m a
 logoutHandler target = performLogout >> target
+
+
+------------------------------------------------------------------------------
+-- | Require that an authenticated 'AuthUser' is present in the current session.
+--
+-- This function has no DB cost - only checks to see if a user_id is present in
+-- the current session.
+requireUser :: MonadAuthUser m t => m a   
+            -- ^ Do this if no authenticated user is present.
+            -> m a    
+            -- ^ Do this if an authenticated user is present.
+            -> m a
+requireUser bad good = authenticatedUserId >>= maybe bad (const good)

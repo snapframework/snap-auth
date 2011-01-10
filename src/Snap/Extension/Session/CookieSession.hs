@@ -59,7 +59,7 @@ data CookieSessionState = CookieSessionState
   { csSiteKey :: Key                -- ^ Cookie encryption key
   , csKeyPath :: FilePath           -- ^ Where the encryption key is stored
   , csCookieName :: ByteString      -- ^ Cookie name for your app's session
-  , csTimeout :: Maybe Int          -- ^ Replay-attack timeout in minutes
+  , csTimeout :: Maybe Int          -- ^ Replay-attack timeout in seconds
   }
 
 
@@ -76,7 +76,7 @@ defCookieSessionState = CookieSessionState
                           { csKeyPath = "site_key.txt"
                           , csSiteKey = ""
                           , csCookieName = "snap-session"
-                          , csTimeout = Just 30
+                          , csTimeout = Just (30 * 60)
                           }
 
 
@@ -117,7 +117,8 @@ instance HasCookieSessionState s => MonadSession (SnapExtend s) where
   -- | Serialize the session, inject into cookie, modify response.
   setSessionShell t = do
     cs <- asks getCookieSessionState
-    setSecureCookie (csCookieName cs) (csSiteKey cs) t
+    key <- secureSiteKey
+    setSecureCookie (csCookieName cs) key t (csTimeout cs)
 
 
   ----------------------------------------------------------------------------
@@ -125,10 +126,13 @@ instance HasCookieSessionState s => MonadSession (SnapExtend s) where
   -- (empty) session.
   getSessionShell = do
     cs <- asks getCookieSessionState
+    key <- secureSiteKey
     let cn = csCookieName cs
-    let key = csSiteKey cs
     let timeout = csTimeout cs
     d <- getSecureCookie cn key timeout
     return $ maybe defSessionShell id d
+
+
+  secureSiteKey = fmap csSiteKey $ asks getCookieSessionState
 
 
