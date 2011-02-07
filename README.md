@@ -279,4 +279,6 @@ crystallize.
   passwords across the network) or alert the user and disallow logins..  
 
 - Support for "remember me" and "password reset" tokens.
+- Perhaps make Password / Salt opaque field with a Show/Read instance for DB
+  serialization - users should really never need that stuff
 
