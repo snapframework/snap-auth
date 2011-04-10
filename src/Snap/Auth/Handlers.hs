@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 {-|
 
   Provides generic, somewhat customizable handlers that can be plugged 
@@ -29,7 +31,7 @@ loginHandler :: MonadAuthUser m t
              -- ^ The password param field
              -> Maybe ByteString
              -- ^ Remember field; Nothing if you want to remember function.
-             -> m a 
+             -> (AuthFailure -> m a)
              -- ^ Upon failure
              -> m a 
              -- ^ Upon success
@@ -40,9 +42,9 @@ loginHandler pwdf remf loginFailure loginSuccess = do
     remember <- maybe (return Nothing) getParam remf
     let r = maybe False (=="1") remember
     mMatch <- case password of
-      Nothing -> return Nothing
-      Just p -> performLogin euid p r
-    maybe loginFailure (const loginSuccess) mMatch
+      Nothing -> return $ Left PasswordFailure
+      Just p  -> performLogin euid p r
+    either loginFailure (const loginSuccess) mMatch
 
 
 ------------------------------------------------------------------------------
