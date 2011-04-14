@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 {-| 
 
   This module provides simple and secure high-level authentication
@@ -26,6 +28,7 @@ module Snap.Auth
   , UserId(..)
   , ExternalUserId(..)
   , Password(..)
+  , AuthFailure(..)
 
   -- * Crypto Stuff You May Need
   , HashFunc
@@ -62,6 +65,16 @@ newtype ExternalUserId = EUId { unEuid :: Params }
 data Password = ClearText ByteString
               | Encrypted ByteString
               deriving (Read, Show, Ord, Eq)
+
+
+------------------------------------------------------------------------------
+-- | Authentication failures indicate what went wrong during authentication.
+-- They may provide useful information to the developer, although it is
+-- generally not advisable to show the user the exact details about why login
+-- failed.
+data AuthFailure = ExternalIdFailure
+                 | PasswordFailure
+                 deriving (Read, Show, Ord, Eq)
 
 ------------------------------------------------------------------------------
 -- | Type representing the concept of a User in your application.
@@ -193,7 +206,7 @@ class (MonadSnap m, MonadSession m) => MonadAuth m where
     authAuthenticationKeys :: m [ByteString]
     authAuthenticationKeys = return ["email"]
 
-    
+
     -- | Cookie name for the remember token
     authRememberCookieName :: m ByteString
     authRememberCookieName = return "auth_remember_token"
@@ -225,6 +238,7 @@ class (MonadSnap m, MonadSession m) => MonadAuth m where
 
 
 
+
 ------------------------------------------------------------------------------
 -- | Authenticates a user using user-supplied 'ExternalUserId'.
 --
@@ -235,19 +249,19 @@ authenticate :: MonadAuthUser m t
              => ExternalUserId        -- ^ External user identifiers
              -> ByteString            -- ^ Password
              -> Bool                  -- ^ Remember user?
-             -> m (Maybe (AuthUser, t))      
+             -> m (Either AuthFailure (AuthUser, t))      
 authenticate uid password remember = do
     hf <- authHash
     user <- getUserExternal uid
     case user of
-      Nothing -> return Nothing
+      Nothing            -> return $ Left ExternalIdFailure
       Just user'@(u', _) -> case check hf password u' of
         True -> do
           markLogin user'
-          return user
+          return $ Right user'
         False -> do
           markLoginFail user'
-          return Nothing
+          return $ Left PasswordFailure
     where
       check hf p u = checkSalt hf p $ mkSaltedHash u
 
@@ -297,7 +311,7 @@ authenticate uid password remember = do
             setSecureCookie cn site_key token (Just to)
             return $ u { userPersistenceToken = Just token }
 
-        
+
 
 -- $higherlevel
 -- These are the key functions you will use in your handlers. Once you have set
@@ -312,12 +326,12 @@ performLogin :: MonadAuthUser m t
              => ExternalUserId        -- ^ External user identifiers
              -> ByteString            -- ^ Password
              -> Bool                  -- ^ Remember user?
-             -> m (Maybe (AuthUser, t))      
-performLogin euid p r = authenticate euid p r >>= maybe (return Nothing) login
+             -> m (Either AuthFailure (AuthUser, t))      
+performLogin euid p r = authenticate euid p r >>= either (return . Left) login
   where 
     login x@(user, _) = do
       setSessionUserId (userId user) 
-      return (Just x)
+      return (Right x)
 
 
 ------------------------------------------------------------------------------
