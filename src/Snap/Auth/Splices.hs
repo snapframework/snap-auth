@@ -26,10 +26,10 @@ metaCSRFTag = do
   param <- lift authAuthenticityTokenParam
   let metaToken = X.Element "meta"
                     [ ("name", "csrf-token")
-                    , ("value", T.decodeUtf8 embeddedToken) ] []
+                    , ("content", T.decodeUtf8 embeddedToken) ] []
   let metaParam = X.Element "meta" 
                     [ ("name", "csrf-param") 
-                    , ("value", T.decodeUtf8 param) ] []
+                    , ("content", T.decodeUtf8 param) ] []
   return $ [metaParam, metaToken]
 
 
