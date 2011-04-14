@@ -13,12 +13,17 @@ module Snap.Auth.Handlers
   ( loginHandler
   , logoutHandler
   , requireUser
+  , checkCSRF
   ) where
+
+import Control.Applicative ( (<|>) )
+import Control.Monad (when)
 
 import Data.ByteString (ByteString)
 
 import Snap.Types
 import Snap.Auth
+import Snap.Extension.Session.CookieSession (sessionCSRFToken)
 
 ------------------------------------------------------------------------------
 -- | A 'MonadSnap' handler that processes a login form. 
@@ -65,3 +70,30 @@ requireUser :: MonadAuthUser m t => m a
             -- ^ Do this if an authenticated user is present.
             -> m a
 requireUser bad good = authenticatedUserId >>= maybe bad (const good)
+
+
+------------------------------------------------------------------------------
+-- | Handler to protect against CSRF attacks. Chain this handler at the
+-- beginning of your routing table to enable.
+--
+-- Example:
+--
+-- @redirError = logError "Someone tried to bypass CSRF" >> redirect "/"
+--
+-- checkCSRF redirError >> route [myHandler, myHandler2, ...]
+-- @
+--
+-- The convention is to submit an "authenticity_token" parameter with each
+-- 'POST' request. This action will confirm its presence against what is safely
+-- embedded in the session and execute the given action if they don't match.
+-- The exact name of the parameter is defined by 'authAuthenticityTokenParam'.
+checkCSRF :: MonadAuth m => m ()
+          -- ^ Do this if CSRF token does not match.
+          -> m ()
+checkCSRF failAct = method POST doCheck <|> return () 
+  where 
+    doCheck = do
+      embeddedToken <- sessionCSRFToken
+      param <- authAuthenticityTokenParam
+      submitted <- maybe "" id `fmap` getParam param
+      when (submitted /= embeddedToken) failAct
