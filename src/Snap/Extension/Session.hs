@@ -61,7 +61,7 @@ class MonadSnap m => MonadSession m where
     csrf <- liftM sesCSRFToken getSessionShell
     case csrf of
       Nothing -> do
-        t <- liftIO $ randomToken 15
+        t <- liftIO $ randomToken 35
         updateSessionShell (\s -> s { sesCSRFToken = Just t })
         return t
       Just t -> return t
