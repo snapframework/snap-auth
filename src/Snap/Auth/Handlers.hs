@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 {-|
 
   Provides generic, somewhat customizable handlers that can be plugged 

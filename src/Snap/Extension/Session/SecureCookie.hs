@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 {-|
 
   This is a support module meant to back all session back-end implementations.

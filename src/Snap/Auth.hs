@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 {-| 
 
   This module provides simple and secure high-level authentication
