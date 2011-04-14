@@ -199,6 +199,11 @@ class (MonadSnap m, MonadSession m) => MonadAuth m where
     authRememberCookieName = return "auth_remember_token"
 
 
+    -- | Name of the CSRF token parameter
+    authAuthenticityTokenParam :: m ByteString
+    authAuthenticityTokenParam = return "authenticity_token"
+
+
     -- | Remember period in seconds. Defaults to 2 weeks.
     authRememberPeriod :: m Int
     authRememberPeriod = return $ 60 * 60 * 24 * 14
