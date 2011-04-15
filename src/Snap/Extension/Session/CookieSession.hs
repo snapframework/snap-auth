@@ -133,6 +133,6 @@ instance HasCookieSessionState s => MonadSession (SnapExtend s) where
     return $ maybe defSessionShell id d
 
 
-  secureSiteKey = fmap csSiteKey $ asks getCookieSessionState
+  secureSiteKey = asks $ csSiteKey . getCookieSessionState
 
 
