@@ -14,8 +14,8 @@ Library
     exposed-modules:
         Snap.Auth
         Snap.Auth.Handlers
-        Snap.Auth.Splices
         Snap.Extension.Session.CookieSession
+        Snap.Extension.Session.Helpers
     other-modules:
         Snap.Auth.Password
         Snap.Extension.Session
