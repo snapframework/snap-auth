@@ -42,7 +42,7 @@ Library
         text >= 0.11,
         transformers >= 0.2.2
 
-    ghc-options: -Wall -funbox-strict-fields -O2 -fvia-C -optc-O3 -funfolding-use-threshold=16
+    ghc-options: -Wall -funbox-strict-fields -O2 -optc-O3 -funfolding-use-threshold=16
 
     extensions:
         OverloadedStrings
