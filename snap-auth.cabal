@@ -1,5 +1,5 @@
 Name:                snap-auth
-Version:             0.1.1.0
+Version:             0.1.1.2
 Synopsis:            An authentication/session management system for Snap
 Author:              Doug Beardsley, Ozgun Ataman
 Stability:           Experimental
