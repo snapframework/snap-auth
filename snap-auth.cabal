@@ -2,11 +2,18 @@ Name:                snap-auth
 Version:             0.1.1.2
 Synopsis:            An authentication/session management system for Snap
 Author:              Doug Beardsley, Ozgun Ataman
+Maintainer:          Ozgun Ataman
 Stability:           Experimental
 Category:            Web
 Build-type:          Simple
-
 Cabal-Version:       >= 1.6
+Description:         
+  Snap.Auth provides two pieces of major functionality for Snap applications:
+    - Sessions support
+    - User authentication
+
+  This library will be ported over to the new Snaplets infrastructure when our
+  work there is complete. 
 
 Library
     hs-source-dirs:
