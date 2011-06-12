@@ -26,7 +26,7 @@ import           Data.ByteString.Internal (c2w)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import           Data.Digest.SHA512
-import           Data.Generics hiding ((:+:))
+import           Data.Generics
 
 
 ------------------------------------------------------------------------------
